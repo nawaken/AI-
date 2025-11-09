@@ -1,181 +1,189 @@
-<<<<<<< HEAD
-# 🎯 開発方針
-このプロジェクトは「AI駆動開発 (AI-Driven Development)」を採用する。  
-AIはSDD（Software Design Document）に基づいて、各開発ステップを段階的に支援する。  
-スクリプト開発時はテスト駆動開発 (TDD) を徹底し、テストケースを先に作成する。
-=======
-# 🎯 開発方針
-このプロジェクトは「AI駆動開発 (AI-Driven Development)」を採用する。  
-AIはSDD（Software Design Document）に基づいて、各開発ステップを段階的に支援する。  
-スクリプト開発時はテスト駆動開発 (TDD) を徹底し、テストケースを先に作成する。
->>>>>>> main
+# n8n 月次電気料金通知フロー 要件定義書（DOC-ID: REQ-EL-001）
 
----
+## 0. 図ID一覧
+- **DF-01**: 全体処理フロー（Mermaid `graph LR`）
+- **DF-02**: ログインフォーム要素とPOSTシーケンス（Mermaid `graph TD` + `sequenceDiagram`）
+- **CD-01**: データオブジェクト構造（Mermaid `classDiagram`）
+- **ER-01**: プロセスとデータの依存関係（Mermaid `erDiagram`）
 
-## 🧠 Codex System Message (SYS-001)
-以下のメッセージを運用ルールとして扱い、常に参照する。
+## 1. 目的（OBJ-01）
+毎月1回、電力会社のマイページから電気料金を取得し、Discordへ定型フォーマットで通知することで料金監視を自動化する（参照: DF-01）。
 
+## 2. 利用者・通知先（USR-01）
+- 主利用者: 電力料金の監視担当者
+- 通知チャネル: 指定Discordチャンネル（Webhook URLはn8nクレデンシャルに格納）
+
+## 3. 前提・制約（CON-01〜CON-03）
+- CON-01: 対象サイトはASP.NETフォームで、`mainform`配下のhidden項目とdoPostBack機構を利用する（参照: DF-02）。
+- CON-02: 認証情報（ID/PW）はn8nのCredentialsで暗号化保存し、環境変数から注入可能にする。
+- CON-03: セッションはCookieベース。ログインPOSTで得たCookieを後続の請求取得リクエストに必ず付与する（参照: ER-01）。
+
+## 4. システム概要（SYN-01）
+n8nフローはCronトリガーを起点に、ログインページGET→hidden抽出→フォームPOST→請求ページGET→パース→Discord通知→失敗時アラートという直列処理で構成する。処理順序と責務はDF-01とER-01を基準とする。
+
+## 5. 機能要件
+- **FR-01 スケジューラ**  
+  - Cronノードは毎月1日09:00 JSTに起動。タイムゾーンはUTC+9固定。失敗時は即時リトライ1回（参照: DF-01）。
+
+- **FR-02 ログインページ取得**  
+  - HTTP Requestノード `LOGIN_GET` は `GET /miruden/servicetop/login?...` を実行し、`HTML_Login.raw_html` として保存する（参照: DF-01, CD-01）。
+
+- **FR-03 hidden値抽出**  
+  - Functionノード `HIDDEN_EXTRACT` は `__VIEWSTATE` 等のhidden入力と `container_0$Referrer` を抽出し、JSON (`Hidden_JSON`) として後続へ渡す。抽出失敗時はエラー分岐（参照: DF-02, CD-01）。
+
+- **FR-04 認証POST**  
+  - HTTP Requestノード `LOGIN_POST` は `application/x-www-form-urlencoded` で hidden項目 + `Env_IDPW` を送信し、レスポンスCookieを `Session_Cookie` として保持する。`__EVENTTARGET=container_0$Login` を明示設定する（参照: DF-02, CD-01）。
+
+- **FR-05 請求データ取得・整形**  
+  - `BILL_GET` はログインCookieを付加して請求ページをGETし、`HTML_Bill` を `BILL_PARSE` でJSON化（`Bill_JSON`）。最低限 `month` と `amount` を抽出し、複数月の場合は配列で保持する（参照: DF-01, CD-01）。
+
+- **FR-06 Discord通知**  
+  - Discord Webhookノード `DISCORD_POST` はEmbed形式で、対象期間・料金・更新日時・実行IDを出力。Embed上限（6000文字）を超える場合はテキスト分割する（参照: DF-01）。
+
+- **FR-07 エラーアラート**  
+  - どの段階で失敗しても `Monitoring_Channel` へ障害通知を送る。通知には失敗ステップID（例: `FR-03`）とエラー概要を含める（参照: DF-01）。
+
+## 6. 非機能要件
+- **NFR-01 可用性**: CronはJST、実行時間は60秒以内を目標。n8nの実行履歴でリトライステータスを確認可能にする。
+- **NFR-02 セキュリティ**: CredentialsストアにWebhook/ID/PWを保存し、ログ・Discordメッセージには平文を残さない（参照: CD-01）。
+- **NFR-03 保守性**: 環境変数で対象URL、Webhook、通知テンプレートを切替可能。ID付き要件をWiki等で追跡。
+- **NFR-04 監査性**: 各ノードで `executionId` をログ出力し、`Bill_JSON` を保管する期間・場所を運用チームで管理。
+
+## 7. データ・インターフェース要件
+- **DATA-01 HTML_Login**: 元HTMLをUTF-8で保持。次処理までの一時データとし、永続化不要（参照: CD-01）。
+- **DATA-02 Hidden_JSON**: `COUNTRY_CODE`, `__VIEWSTATE`, `__EVENTVALIDATION`, `__EVENTTARGET`, `Referrer`, `SCROLL_X/Y` を含む（参照: DF-02, CD-01）。
+- **DATA-03 Env_IDPW**: `user_id`, `password` を Credentials から読み出し、POSTボディ以外に露出させない。
+- **DATA-04 Session_Cookie**: Cookie名は図ER-01の `cookie_jar_name` に従って再利用する。
+- **DATA-05 Bill_JSON**: `{ "month": "YYYY-MM", "amount": number, "plan": string, "updatedAt": ISO8601 }` を最低限保持し、Discord通知およびログに利用する（参照: DF-01, ER-01）。
+
+## 8. 運用・ログ要件
+- **OPS-01 実行ログ**: n8n実行履歴と外部ログ（任意）に `executionId`, `FRステップID`, `結果` を記録。
+- **OPS-02 手動トリガー**: テスト実行用の `manual` トリガーを用意し、Discordへは「テスト」ラベル付きで投稿する。
+- **OPS-03 秘匿情報管理**: 認証情報・WebhookはID単位（例: `CRD-LOGIN-01`, `CRD-DISCORD-01`）で棚卸し。
+
+## 9. Mermaid図
+
+### 図ID: DF-01（全体処理フロー）
+```mermaid
+graph LR
+    C[Cron<br/>月次トリガー] --> G[HTTP_Request<br/>ログインページGET]
+    G --> H[Code_TS<br/>hidden値抽出]
+    H --> P[HTTP_Request<br/>ログインPOST]
+    P --> B[HTTP_Request<br/>請求ページGET]
+    B --> E[Code_TS<br/>請求HTMLパース]
+    E --> D[HTTP_Request<br/>Discord Webhook送信]
 ```
-1. 開発プロセス
-   - SDD (Step-Driven Development) に従い、各ステップの目的 / 成果物 / 検証を明記する。
-   - スクリプト実装時は必ずTDD (Test-Driven Development) を適用し、テスト→実装→リファクタリングの順で進め、テスト結果を報告する。
 
-2. ID管理
-   - 要件 / 仕様 / スクリプト / テスト / 図を一意ID (例: REQ-####, SPEC-####, SCR-####, TEST-####, DF-##) で紐づける。
-   - 文章やコメントでは該当IDを参照し、差分や影響範囲もID単位で説明する。
+### 図ID: DF-02（ログインフォーム構造とPOST）
+```mermaid
+graph TD
+    A[form: mainform]
 
-3. 成果物フォーマット
-   - 文章はMarkdown形式 (.md) で作成する。
-   - 図はMermaid記法で作成し、図自体にもIDを付ける。
+    subgraph Hidden_Inputs
+        H_COUNTRY[COUNTRY_CODE : JP]
+        H_VIEWSTATE[__VIEWSTATE : ...]
+        H_VIEWSTATEG[__VIEWSTATEGENERATOR : ...]
+        H_EVENTVALID[__EVENTVALIDATION : ...]
+        H_EVENTTARGET[__EVENTTARGET : container_0$Login]
+        H_EVENTARG[__EVENTARGUMENT : ""]
+        H_SCROLLX[__SCROLLPOSITIONX : 0]
+        H_SCROLLY[__SCROLLPOSITIONY : 0]
+        H_REF[container_0$Referrer : /miruden/mypage]
+    end
 
-4. 一般指針
-   - 各ステップで Input / Process / Output を記述する。
-   - 仮定や判断を行う場合は根拠と影響範囲を明示する。
-   - 指示を満たせない場合は理由と代替案を提示する。
+    subgraph Visible_Inputs
+        V_USER[container_0$UserID : 入力ID]
+        V_PASS[container_0$Password : 入力PW]
+        V_SAVE[container_0$SaveLoginInfo : on]
+    end
+
+    A --> Hidden_Inputs
+    A --> Visible_Inputs
 ```
-
----
-
-# 🧩 基本ルール
-
-1. **開発フロー**
-   1. 要件定義 → 
-<<<<<<< HEAD
-   2. 機能設計 (SDD作成) →  
-   3. スクリプト作成 (TDD形式) →  
-   4. テスト・検証 →  
-   5. ドキュメント更新
-
-2. **識別子管理**
-   - すべての要件、仕様、スクリプト、テストには共通の **ID** を付与して紐づける。
-   - ID形式：`REQ-####`, `SPEC-####`, `SCRIPT-####`, `TEST-####`  
-     （例：REQ-0001 ←→ SPEC-0001 ←→ SCRIPT-0001 ←→ TEST-0001）
-
-3. **ドキュメント形式**
-   - 文章はすべて **Markdown形式 (.md)** で記述する。  
-   - 図表・フローチャートは **Mermaid記法** で記述する。  
-   - コードはフェンスブロック（例：```python```）を使用。
-
-4. **生成スタイル**
-   - 出力は常に再利用可能なMarkdown構造で生成する。  
-   - 各セクションは見出し付き (`##`) とし、AIが追記・改訂しやすいように統一する。  
-   - コードブロックの先頭に関連IDをコメントとして含める。
-
----
-
-# 📘 出力テンプレート例
-
-## REQ-0001: 要件定義
-- 概要:  
-- 利用者:  
-- 成果物:  
-- 関連仕様: SPEC-0001  
-
----
-
-## SPEC-0001: 機能仕様（SDD）
-- 機能概要:  
-- 入出力:  
-- 処理フロー:  
 
 ```mermaid
-flowchart TD
-  A[入力] --> B[処理]
-  B --> C[出力]
+sequenceDiagram
+    participant User as ユーザー
+    participant Browser as ブラウザ
+    participant Form as mainform
+    participant Server as /miruden/servicetop/login
+
+    User->>Browser: ログインボタンをクリック
+    Browser->>Browser: __doPostBack('container_0$Login','')
+    Browser->>Form: __EVENTTARGET を "container_0$Login" に設定
+    Browser->>Form: __EVENTARGUMENT を "" に設定
+    Note over Form: mainform配下の全inputを収集
+    Browser->>Server: POST ... Body: name=value 全項目
+    Server-->>Browser: 認証結果/遷移先HTMLを返却
 ```
 
-関連スクリプト: SCRIPT-0001
-
-SCRIPT-0001: スクリプト（TDD準拠）
-テスト仕様 (TEST-0001)
-# TEST-0001
-# 機能: 入力値が正常に検証されること
-def test_validate_input():
-    assert validate_input("abc") == True
-
-実装
-# SCRIPT-0001
-def validate_input(text):
-    return isinstance(text, str) and len(text) > 0
-
-✅ AIへの期待動作
-
-各フェーズ（要件 → 設計 → 実装 → テスト）を 段階的 に提示・更新する。
-
-生成物は Markdown＋Mermaid で表現し、ID整合性を維持する。
-
-スクリプト生成時は必ず 先にテストケースを提案 してから実装を出す。
-
-ID間のリンクを維持し、後から追跡可能な構造を保つ。
-
-
-=======
-   2. 機能設計 (SDD作成) →  
-   3. スクリプト作成 (TDD形式) →  
-   4. テスト・検証 →  
-   5. ドキュメント更新
-
-2. **識別子管理**
-   - すべての要件、仕様、スクリプト、テストには共通の **ID** を付与して紐づける。
-   - ID形式：`REQ-####`, `SPEC-####`, `SCRIPT-####`, `TEST-####`  
-     （例：REQ-0001 ←→ SPEC-0001 ←→ SCRIPT-0001 ←→ TEST-0001）
-
-3. **ドキュメント形式**
-   - 文章はすべて **Markdown形式 (.md)** で記述する。  
-   - 図表・フローチャートは **Mermaid記法** で記述する。  
-   - コードはフェンスブロック（例：```python```）を使用。
-
-4. **生成スタイル**
-   - 出力は常に再利用可能なMarkdown構造で生成する。  
-   - 各セクションは見出し付き (`##`) とし、AIが追記・改訂しやすいように統一する。  
-   - コードブロックの先頭に関連IDをコメントとして含める。
-
----
-
-# 📘 出力テンプレート例
-
-## REQ-0001: 要件定義
-- 概要:  
-- 利用者:  
-- 成果物:  
-- 関連仕様: SPEC-0001  
-
----
-
-## SPEC-0001: 機能仕様（SDD）
-- 機能概要:  
-- 入出力:  
-- 処理フロー:  
-
+### 図ID: CD-01（データオブジェクト）
 ```mermaid
-flowchart TD
-  A[入力] --> B[処理]
-  B --> C[出力]
+classDiagram
+    class HTML_Login {
+        string raw_html
+    }
+
+    class Hidden_JSON {
+        string COUNTRY_CODE
+        string VIEWSTATE
+        string VIEWSTATEG
+        string EVENTVALIDATION
+        string EVENTTARGET
+        string EVENTARGUMENT
+        string SCROLL_X
+        string SCROLL_Y
+        string Referrer
+    }
+
+    class Env_IDPW {
+        string user_id
+        string password
+    }
+
+    class Session_Cookie {
+        string cookie_jar_name
+    }
+
+    class HTML_Bill {
+        string raw_html
+    }
+
+    class Bill_JSON {
+        string month
+        string amount
+        string plan
+        string updatedAt
+    }
 ```
 
-関連スクリプト: SCRIPT-0001
+### 図ID: ER-01（プロセス×データ依存）
+```mermaid
+erDiagram
+    LOGIN_GET ||--o{ HTML_LOGIN : produces
+    HIDDEN_EXTRACT ||--o{ HIDDEN_JSON : produces
+    LOGIN_POST ||--o{ SESSION_COOKIE : produces
+    BILL_GET ||--o{ HTML_BILL : produces
+    BILL_PARSE ||--o{ BILL_JSON : produces
 
-SCRIPT-0001: スクリプト（TDD準拠）
-テスト仕様 (TEST-0001)
-# TEST-0001
-# 機能: 入力値が正常に検証されること
-def test_validate_input():
-    assert validate_input("abc") == True
+    LOGIN_POST }o--|| HIDDEN_JSON : uses
+    LOGIN_POST }o--|| ENV_IDPW : uses
+    BILL_GET }o--|| SESSION_COOKIE : uses
+    BILL_PARSE }o--|| HTML_BILL : uses
+    DISCORD_POST }o--|| BILL_JSON : uses
+```
 
-実装
-# SCRIPT-0001
-def validate_input(text):
-    return isinstance(text, str) and len(text) > 0
+## 10. 図・要件IDのリンクと変更管理手順
 
-✅ AIへの期待動作
+- **CM-01 Gitブランチ運用**: `main` を基準に変更単位ごとにブランチ（例: `feature/req-fr05-update`）を作成し、`要件.md` や図ファイルを編集する。ブランチ名とコミットメッセージに対象ID（FR-xx/DF-xx等）を含めて追跡性を確保する。
+- **CM-02 レビュー・マージ**: 変更はPull Requestで提出し、説明欄に変更理由・影響範囲・対象IDを列挙。レビューアは差分とMermaid図の整合性を確認してからマージ可否を判断する。
+- **CM-03 バージョニング**: `REQ-EL-001` のリビジョン番号（例: `REQ-EL-001 v1.1`）を本文先頭に更新し、`CHANGELOG.md` などにコミットID・日付・概要を追記。タグ（例: `req-el-001-v1.1`）を打っておくと復元しやすい。
+- **CM-04 参照整合性チェック**: 要件IDや図IDを追加/削除する場合、`git grep` でリポジトリ全体を検索し、未更新リンクが無いか確認。必要に応じて互換ガイドラインや移行手順を別節に追記する。
+<<<<<<< HEAD
+=======
 
-各フェーズ（要件 → 設計 → 実装 → テスト）を 段階的 に提示・更新する。
+## 11. 開発方針ステータス
 
-生成物は Markdown＋Mermaid で表現し、ID整合性を維持する。
-
-スクリプト生成時は必ず 先にテストケースを提案 してから実装を出す。
-
-ID間のリンクを維持し、後から追跡可能な構造を保つ。
-
-
+- **STATUS-01 中止判断**: Webスクレイピングによる認証POST（FR-04）が、hiddenフィールドとID/PWを正しく送信しても突破できないことが判明した。電力サイト側で追加の検証やbot対策が導入されている可能性が高く、現状の構成（DF-01/DF-02）では要件達成が不可能なため、本改修は一旦中止（没）とする。
+- **STATUS-02 再開条件**: 正式なAPI提供やスクレイピング許可付きの代替エンドポイントが入手できる場合、もしくは電力会社と連携して自動取得手段を確保できた場合に再評価する。
 >>>>>>> main
