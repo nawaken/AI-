@@ -1,0 +1,303 @@
+{
+  "name": "kepco_失敗",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -336,
+        -96
+      ],
+      "id": "5da6b298-1485-4488-a9f3-2e3a75d8282b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://kepco.jp/miruden/servicetop/login",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"User-Agent\": \"Mozilla/5.0 ...\",\n  \"Accept\": \"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\",\n  \"Accept-Language\": \"ja,en;q=0.9\",\n  \"Connection\": \"keep-alive\"\n}",
+        "options": {
+          "allowUnauthorizedCerts": true,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text",
+              "outputPropertyName": "data "
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        -96
+      ],
+      "id": "c6d090cb-1d58-477c-8ef0-9027e8de9192",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ノード名の例：Login_HTML_Wrap\n// Input : items[i].json.body に HTML が入っている想定\n// Output: items[i].json.HTML_LOGIN.raw_html に詰め直す\nconst item = $input.first().json['data ']\nconst newItems = [];\nconst setCookie = $input.first().json.headers['set-cookie']\n\nlet cookieHeader = '';\nif (Array.isArray(setCookie)) {\n    cookieHeader = setCookie\n      .map(c => c.split(';')[0])\n      .join('; ');\n  } else if (typeof setCookie === 'string') {\n    cookieHeader = setCookie.split(';')[0];\n  }\n\n  newItems.push({\n    json: {\n      cookie: cookieHeader,\n      HTML_LOGIN: {\n        raw_html: item,\n      },\n    },\n  });\n\n\nreturn newItems;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        -96
+      ],
+      "id": "f36b3cbd-abc3-461e-8107-11ce43d4d6b0",
+      "name": "JSON型に成形"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hidden_Extract_JS\n// Input : items[i].json.HTML_LOGIN.raw_html にログインページHTML\n// Output: items[i].json に Hidden_JSON を詰める\n\n// name=\"...\" value=\"...\" の hidden input から value を取り出すヘルパー\n\n\nfunction extractHidden(html, name) {\n  // container_0$Referrer みたいに $ があるのでエスケープ\n  const escapedName = name.replace(/\\$/g, \"\\\\$\");\n\n  const re = new RegExp(\n    `<input[^>]+name=[\"']${escapedName}[\"'][^>]*value=[\"']([^\"']*)[\"']`,\n    \"i\"\n  );\n  const m = html.match(re);\n  return m ? m[1] : null;\n}\n\nconst newItems = [];\nconst cookies = $input.first().json.cookie\n\n  const html =　$('HTTP Request').first().json['data ']\n\n\n  const COUNTRY_CODE =\n    extractHidden(html, \"COUNTRY_CODE\") || \"JP\";\n\n  const VIEWSTATE =\n    extractHidden(html, \"__VIEWSTATE\") || \"\";\n\n  const VIEWSTATEG =\n    extractHidden(html, \"__VIEWSTATEGENERATOR\") || \"\";\n\n  const EVENTVALIDATION =\n    extractHidden(html, \"__EVENTVALIDATION\") || \"\";\n\n  const SCROLL_X =\n    extractHidden(html, \"__SCROLLPOSITIONX\") || \"0\";\n\n  const SCROLL_Y =\n    extractHidden(html, \"__SCROLLPOSITIONY\") || \"0\";\n\n  const Referrer =\n    extractHidden(html, \"container_0$Referrer\") ||\n    \"/miruden/mypage\";\n\n  const hiddenJson = {\n    COUNTRY_CODE,\n    VIEWSTATE,\n    VIEWSTATEG,\n    EVENTVALIDATION,\n    SCROLL_X,\n    SCROLL_Y,\n    Referrer,\n    cookies,\n  };\n\n  newItems.push({\n    json: hiddenJson,\n  });\n\n\nreturn newItems;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -96
+      ],
+      "id": "7426dc86-2026-4c1f-b3f9-1063765b5c7e",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kepco.jp/miruden/servicetop/login?DISP_ID=%2fmiruden%2fmypage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 ..."
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "ja,en;q=0.9"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=COUNTRY_CODE",
+              "value": "={{ $json.COUNTRY_CODE }}"
+            },
+            {
+              "name": "=__VIEWSTATE",
+              "value": "={{ $json.VIEWSTATE }}"
+            },
+            {
+              "name": "=__VIEWSTATEGENERATOR",
+              "value": "={{ $json.VIEWSTATEG }}"
+            },
+            {
+              "name": "=__EVENTVALIDATION",
+              "value": "={{ $json.EVENTVALIDATION }}"
+            },
+            {
+              "name": "=__SCROLLPOSITIONX",
+              "value": "={{ $json.SCROLL_X }}"
+            },
+            {
+              "name": "=__SCROLLPOSITIONY",
+              "value": "={{ $json.SCROLL_Y }}"
+            },
+            {
+              "name": "__EVENTTARGET",
+              "value": "container_0$Login"
+            },
+            {
+              "name": "__EVENTARGUMENT",
+              "value": "””"
+            },
+            {
+              "name": "container_0$UserID",
+              "value": "="
+            },
+            {
+              "name": "container_0$Password",
+              "value": "="
+            },
+            {
+              "name": "container_0$SaveLoginInfo",
+              "value": "on"
+            },
+            {
+              "name": "container_0$Referrer",
+              "value": "={{ $json.Referrer }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        544,
+        -64
+      ],
+      "id": "07eb1bd3-2803-48ba-9451-a879ad823c0f",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://kepco.jp/miruden/servicetop/login?DISP_ID=%2fmiruden%2fmypage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 ..."
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "ja,en;q=0.9"
+            },
+            {
+              "name": "Connection",
+              "value": "close"
+            },
+            {
+              "name": "Cookie",
+              "value": "={{ $json.cookies }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "COUNTRY_CODE",
+              "value": "={{ $json.COUNTRY_CODE }}"
+            },
+            {
+              "name": "__EVENTTARGET",
+              "value": "container_0$Login"
+            },
+            {
+              "name": "__VIEWSTATE",
+              "value": "={{ $json.VIEWSTATE }}"
+            },
+            {
+              "name": "__VIEWSTATEGENERATOR",
+              "value": "={{ $json.VIEWSTATEG }}"
+            },
+            {
+              "name": "__EVENTVALIDATION",
+              "value": "={{ $json.EVENTVALIDATION }}"
+            },
+            {
+              "name": "__EVENTARGUMENT"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 3000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        736,
+        -224
+      ],
+      "id": "451342c9-085a-4456-84cd-733c5587e3c0",
+      "name": "HTTP Request2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "JSON型に成形",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JSON型に成形": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "61edf92a-2e27-49d0-95d9-7dad7874e360",
+  "meta": {
+    "instanceId": "bc6a1712f7abb57b3f537537c18990f69d87137c82cbacbf825b20e053962ba3"
+  },
+  "id": "qTeVnzH9KS92YeOF",
+  "tags": []
+}
